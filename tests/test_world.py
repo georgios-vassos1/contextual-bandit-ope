@@ -46,6 +46,23 @@ def test_regret(world: OpenMLCC18World) -> None:
             break
 
 
+def test_nan_imputation(tmp_path: "Path") -> None:
+    """World should impute NaN values in the feature matrix without error."""
+    import pickle
+    from pathlib import Path
+
+    rng = np.random.default_rng(99)
+    X = rng.standard_normal((50, 4))
+    X[0, 0] = np.nan  # inject a NaN
+    X[10, 2] = np.nan
+    y = (np.arange(50) % 2).astype(np.intp)
+    with open(tmp_path / "nan_task", "wb") as fh:
+        pickle.dump((X, y), fh)
+
+    w = OpenMLCC18World(task_id="nan_task", data_dir=tmp_path, reward_variance=0.0)
+    assert not np.any(np.isnan(w.contexts))
+
+
 def test_reward_mean_per_arm(world: OpenMLCC18World) -> None:
     x = world.contexts[0]
     optimal = int(world.arms[0])

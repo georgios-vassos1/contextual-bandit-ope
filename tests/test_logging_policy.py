@@ -53,3 +53,10 @@ def test_arms_in_valid_range(world: OpenMLCC18World) -> None:
     data = run_logging_policy(world, config)
     assert np.all(data.A >= 0)
     assert np.all(data.A < world.arm_count)
+
+
+def test_unknown_strategy_raises(world: OpenMLCC18World) -> None:
+    import pytest
+    config = LoggingConfig(batch_count=1, batch_size=10, strategy="bogus")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="Unknown strategy"):
+        run_logging_policy(world, config)
