@@ -1,6 +1,7 @@
 """Tests for run_bandit_simulations and run_ope_simulations."""
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from sklearn.linear_model import LinearRegression
 
@@ -53,3 +54,29 @@ def test_run_ope_simulations_all_fields_set(
         assert r.dm is not None
         assert r.ips is not None
         assert r.dr is not None
+
+
+def test_seed_reproducibility(world: OpenMLCC18World, small_config: LoggingConfig) -> None:
+    """Same seed must produce identical BanditData across two calls."""
+    r1 = run_bandit_simulations(world, small_config, n_simulations=3, n_jobs=1, seed=42)
+    r2 = run_bandit_simulations(world, small_config, n_simulations=3, n_jobs=1, seed=42)
+    for bd1, bd2 in zip(r1, r2):
+        np.testing.assert_array_equal(bd1.A, bd2.A)
+        np.testing.assert_array_equal(bd1.Y, bd2.Y)
+
+
+def test_different_seeds_differ(world: OpenMLCC18World, small_config: LoggingConfig) -> None:
+    """Different seeds should (with overwhelming probability) produce different data."""
+    r1 = run_bandit_simulations(world, small_config, n_simulations=2, n_jobs=1, seed=1)
+    r2 = run_bandit_simulations(world, small_config, n_simulations=2, n_jobs=1, seed=2)
+    assert not np.array_equal(r1[0].A, r2[0].A) or not np.array_equal(r1[0].Y, r2[0].Y)
+
+
+def test_simulations_are_independent(world: OpenMLCC18World, small_config: LoggingConfig) -> None:
+    """Each simulation within a seeded run should receive a distinct seed."""
+    results = run_bandit_simulations(world, small_config, n_simulations=3, n_jobs=1, seed=99)
+    # All three arm sequences must not all be identical.
+    assert not (
+        np.array_equal(results[0].A, results[1].A)
+        and np.array_equal(results[1].A, results[2].A)
+    )

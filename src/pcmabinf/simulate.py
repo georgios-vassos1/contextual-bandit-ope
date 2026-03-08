@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 from joblib import Parallel, delayed
 from sklearn.base import BaseEstimator
 
@@ -15,14 +16,25 @@ def run_bandit_simulations(
     config: LoggingConfig,
     n_simulations: int,
     n_jobs: int = -1,
+    seed: int | None = None,
 ) -> list[BanditData]:
     """Run *n_simulations* independent bandit data-collection runs in parallel.
 
     Uses ``joblib.Parallel`` (loky backend by default) so there is no global
     state sharing — each worker receives the arguments by value.
+
+    Parameters
+    ----------
+    seed:
+        Optional integer seed for reproducibility.  A separate seed is derived
+        for each simulation using ``numpy.random.default_rng(seed)``, so every
+        run is independent while the full set of results is reproducible.
+        When ``None`` (default) seeds are drawn from OS entropy.
     """
+    rng = np.random.default_rng(seed)
+    seeds = rng.integers(0, 2**31, size=n_simulations).tolist()
     results: list[BanditData] = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
-        delayed(run_logging_policy)(world, config) for _ in range(n_simulations)
+        delayed(run_logging_policy)(world, config, s) for s in seeds
     )
     return results
 

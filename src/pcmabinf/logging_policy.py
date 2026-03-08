@@ -33,8 +33,24 @@ class LoggingConfig:
             )
 
 
-def run_logging_policy(world: OpenMLCC18World, config: LoggingConfig) -> BanditData:
+def run_logging_policy(
+    world: OpenMLCC18World,
+    config: LoggingConfig,
+    seed: int | None = None,
+) -> BanditData:
     """Collect bandit data by running the logging policy defined in *config*.
+
+    Parameters
+    ----------
+    world:
+        The bandit environment.
+    config:
+        Logging policy configuration.
+    seed:
+        Optional integer seed for NumPy's global random state.  When provided
+        the entire run — arm selection, reward sampling, context resampling —
+        is fully reproducible.  Each parallel worker should receive a distinct
+        seed; see :func:`run_bandit_simulations`.
 
     Returns
     -------
@@ -48,6 +64,8 @@ def run_logging_policy(world: OpenMLCC18World, config: LoggingConfig) -> BanditD
     where *n* is the total number of observations collected before the current
     batch (i.e. ``batch_id * batch_size``).
     """
+    if seed is not None:
+        np.random.seed(seed)
     K = world.arm_count
     N_total = config.batch_count * config.batch_size
     bs = config.batch_size

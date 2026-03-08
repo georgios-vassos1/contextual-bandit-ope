@@ -36,6 +36,7 @@ def main() -> None:
 @click.option("--reward-variance", type=float, default=1.0, show_default=True)
 @click.option("--epsilon-multiplier", type=float, default=0.01, show_default=True)
 @click.option("--n-jobs", type=int, default=-1, show_default=True)
+@click.option("--seed", type=int, default=None, help="Random seed for reproducibility.")
 @click.option(
     "--output-dir",
     type=click.Path(path_type=Path),
@@ -51,6 +52,7 @@ def run_cmd(
     reward_variance: float,
     epsilon_multiplier: float,
     n_jobs: int,
+    seed: int | None,
     output_dir: Path,
 ) -> None:
     """Run bandit simulations and OPE for one or all OpenML-CC18 tasks."""
@@ -86,7 +88,7 @@ def run_cmd(
 
         # Bandit simulations
         bandit_data_list = run_bandit_simulations(
-            world, logging_config, n_simulations=simulations, n_jobs=n_jobs
+            world, logging_config, n_simulations=simulations, n_jobs=n_jobs, seed=seed
         )
 
         # Target policies
