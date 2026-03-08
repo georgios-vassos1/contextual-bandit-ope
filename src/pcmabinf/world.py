@@ -12,9 +12,33 @@ from sklearn.utils import resample
 class OpenMLCC18World:
     """Bandit environment wrapping an OpenML-CC18 classification task.
 
-    The dataset is loaded from a pickle file (features, targets), NaN values are
-    imputed, and the rows are shuffled.  The optimal arm for each context is the
-    original class label.
+    Each OpenML task is a multi-class classification problem repurposed as a
+    contextual bandit.  The arms correspond to class labels (0, 1, …, K-1).
+    For a given context *x*, the optimal arm is the true class label, and the
+    mean reward is 1 if the chosen arm matches the true label and 0 otherwise.
+    Gaussian noise with variance ``reward_variance`` can be added to each
+    observed reward.
+
+    The dataset is loaded from a pickle file at ``data_dir / task_id`` that
+    stores a ``(features, targets)`` tuple.  Missing values are imputed with
+    column means, and rows are randomly permuted at construction time.
+
+    Parameters
+    ----------
+    task_id:
+        OpenML task identifier (used as the pickle file name).
+    data_dir:
+        Directory containing task pickle files.
+    reward_variance:
+        Variance of the Gaussian noise added to each reward observation.
+        Set to 0.0 for a deterministic (noiseless) environment.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``data_dir / task_id`` does not exist.
+    ValueError
+        If ``reward_variance`` is negative.
     """
 
     def __init__(

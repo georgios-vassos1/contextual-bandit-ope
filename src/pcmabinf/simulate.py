@@ -80,9 +80,19 @@ def run_ope_simulations_multipolicy(
 
     Parameters
     ----------
+    bandit_data_list:
+        One :class:`BanditData` per simulation replicate.
+    world:
+        The bandit environment (used for ground-truth computation).
     target_policies:
         Mapping of policy name → policy object.  All policies are evaluated
         against every element of *bandit_data_list*.
+    outcome_model:
+        Sklearn-compatible estimator (cloned inside each worker).
+    n_folds:
+        Cross-fitting folds passed to :class:`OPEEstimator`.
+    n_jobs:
+        Joblib parallelism (-1 = all cores).
 
     Returns
     -------

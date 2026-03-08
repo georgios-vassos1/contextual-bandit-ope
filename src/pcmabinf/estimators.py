@@ -95,30 +95,55 @@ class OPEEstimator:
     # ------------------------------------------------------------------
 
     def _truth(self) -> tuple[float, float]:
+        """Oracle value V(π*) = E_x[∑_a π*(a|x) · 1{a = a*(x)}].
+
+        Variance is zero by definition because this is a population expectation,
+        not a sample estimate.
+        """
         # Oracle: variance is zero by definition (expected value, not a sample).
         mean, _ = self._summarise(self._Q0_star)
         return mean, 0.0
 
     def _dm(self) -> tuple[float, float]:
+        """Direct Method: V̂_DM = (1/N) ∑_i ∑_a π*(a|x_i) Q(x_i, a)."""
         return self._summarise(self._Q_star)
 
     def _ips(self) -> tuple[float, float]:
+        """Inverse Propensity Score: V̂_IPS = (1/N) ∑_i [π*(a_i|x_i) / g(a_i|x_i)] · y_i."""
         phi = (self._g_star_a / self.data.P) * self.data.Y
         return self._summarise(phi)
 
     def _dr(self) -> tuple[float, float]:
+        """Doubly Robust: V̂_DR = (1/N) ∑_i [Q*(x_i) + (π*/g)(y_i - Q(x_i, a_i))]."""
         phi = self._Q_star + (self._g_star_a / self.data.P) * (self.data.Y - self._q_taken)
         return self._summarise(phi)
 
     def _adr(self) -> tuple[float, float]:
+        """Adaptive DR: DR functional weighted by w_i = sqrt(g(a_i|x_i)).
+
+        Down-weights observations with low logging propensity, reducing
+        the variance contribution of high importance-ratio terms.
+        """
         phi = self._Q_star + (self._g_star_a / self.data.P) * (self.data.Y - self._q_taken)
         w = np.sqrt(self.data.P)
         return self._summarise(phi, w)
 
     def _cadr(self) -> tuple[float, float]:
+        """Contextual Adaptive DR: DR functional with observation-level adaptive weights.
+
+        Weights are inversely proportional to the empirical standard deviation of
+        the DR influence function estimated from all preceding observations,
+        as described in Bibaut et al. (2021), §3.
+        """
         return self._adaptive_dr(self._Q_star, self._q_taken)
 
     def _mrdr(self) -> tuple[float, float]:
+        """Marginalized Robust DR: DR with outcome model trained under MRDR weights.
+
+        Q_MRDR minimises a variance-penalised weighted squared loss with sample
+        weights g*(a|x)(1 - g(a|x)) / g(a|x)².  This reduces the variance of
+        the importance-ratio correction term relative to standard DR.
+        """
         phi = (
             self._Q_MRDR_star
             + (self._g_star_a / self.data.P) * (self.data.Y - self._q_mrdr_taken)
@@ -126,6 +151,11 @@ class OPEEstimator:
         return self._summarise(phi)
 
     def _camrdr(self) -> tuple[float, float]:
+        """Contextual Adaptive MRDR: MRDR functional with observation-level adaptive weights.
+
+        Combines the variance-penalised outcome model of MRDR with the
+        data-adaptive weighting scheme of CADR.
+        """
         return self._adaptive_dr(self._Q_CAMRDR_star, self._q_camrdr_taken)
 
     # ------------------------------------------------------------------
