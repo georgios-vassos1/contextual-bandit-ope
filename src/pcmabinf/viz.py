@@ -121,7 +121,7 @@ def visualize_coverage(
         figsize=(size * (n_cols + 3.5), size * (n_rows + 1)),
         squeeze=False,
     )
-    fig.subplots_adjust(top=0.99, bottom=0.01, hspace=0.5, wspace=0.5)
+    fig.subplots_adjust(top=0.92, bottom=0.08, hspace=0.6, wspace=0.5)
 
     # Precompute once — ci_pct is a pure function of a constant.
     ci_label = int(ci_pct(0.95))

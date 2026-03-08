@@ -160,8 +160,12 @@ def run_cmd(
 @click.option("--output", type=click.Path(path_type=Path), default=None)
 def visualize_cmd(results_path: Path, output: Path | None) -> None:
     """Generate coverage scatter-plot grid from a saved results file."""
+    import matplotlib.pyplot as plt
+
     from pcmabinf.viz import visualize_coverage
 
     visualize_coverage(results_path=results_path, output_path=output)
     if output:
         click.echo(f"Figure saved to {output}")
+    else:
+        plt.show()
