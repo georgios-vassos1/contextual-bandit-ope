@@ -4,6 +4,7 @@ import warnings
 
 import numpy as np
 from joblib import Parallel, delayed
+from joblib.externals.loky.process_executor import TerminatedWorkerError
 from sklearn.base import BaseEstimator
 
 from pcmabinf.data import BanditData, OPEResult
@@ -44,9 +45,15 @@ def run_bandit_simulations(
         except Exception:  # noqa: BLE001
             return None
 
-    raw: list[BanditData | None] = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
-        delayed(_single_sim)(s) for s in seeds
-    )
+    try:
+        raw: list[BanditData | None] = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
+            delayed(_single_sim)(s) for s in seeds
+        )
+    except TerminatedWorkerError as exc:
+        raise RuntimeError(
+            "A joblib worker was killed (likely out of memory). "
+            "Try --n-jobs 1 or --task-max-features to skip large tasks."
+        ) from exc
     n_failed = sum(r is None for r in raw)
     if n_failed:
         warnings.warn(
@@ -92,9 +99,15 @@ def run_ope_simulations(
         except Exception:  # noqa: BLE001
             return None
 
-    raw: list[OPEResult | None] = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
-        delayed(_single)(d) for d in bandit_data_list
-    )
+    try:
+        raw: list[OPEResult | None] = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
+            delayed(_single)(d) for d in bandit_data_list
+        )
+    except TerminatedWorkerError as exc:
+        raise RuntimeError(
+            "A joblib worker was killed during OPE estimation (likely out of memory). "
+            "Try --n-jobs 1 or --task-max-features to skip large tasks."
+        ) from exc
     n_failed = sum(r is None for r in raw)
     if n_failed:
         warnings.warn(

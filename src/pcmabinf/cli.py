@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import pickle
 import time
 from pathlib import Path
@@ -38,6 +39,12 @@ def main() -> None:
 @click.option("--n-jobs", type=int, default=-1, show_default=True)
 @click.option("--seed", type=int, default=None, help="Random seed for reproducibility.")
 @click.option(
+    "--task-max-features",
+    type=int,
+    default=None,
+    help="Skip tasks with more than this many features (notebook used 100).",
+)
+@click.option(
     "--output-dir",
     type=click.Path(path_type=Path),
     default=Path("results"),
@@ -53,6 +60,7 @@ def run_cmd(
     epsilon_multiplier: float,
     n_jobs: int,
     seed: int | None,
+    task_max_features: int | None,
     output_dir: Path,
 ) -> None:
     """Run bandit simulations and OPE for one or all OpenML-CC18 tasks."""
@@ -86,47 +94,59 @@ def run_cmd(
             click.echo(f"  Skipping — data file not found for task {tid}")
             continue
 
-        # Bandit simulations
-        bandit_data_list = run_bandit_simulations(
-            world, logging_config, n_simulations=simulations, n_jobs=n_jobs, seed=seed
-        )
-
-        # Target policies
-        train_size = len(bandit_data_list[0].X)
-        target_policies = {
-            "linear": make_target_policy(
-                "contextual",
-                world,
-                outcome_model=LinearRegression(),
-                train_sample_size=train_size,
-            ),
-            "tree": make_target_policy(
-                "contextual",
-                world,
-                outcome_model=DecisionTreeRegressor(),
-                train_sample_size=train_size,
-            ),
-            "arm0": make_target_policy("non_contextual_constant_0", world),
-            "arm1": make_target_policy("non_contextual_constant_1", world),
-        }
-
-        row: dict = {"task_id": tid}
-        for name, policy in target_policies.items():
-            ope_results = run_ope_simulations(
-                bandit_data_list,
-                world,
-                policy,
-                outcome_model=LinearRegression(),
-                n_jobs=n_jobs,
+        if task_max_features is not None and world.feature_count > task_max_features:
+            click.echo(
+                f"  Skipping — {world.feature_count} features exceeds --task-max-features {task_max_features}"
             )
-            metrics = compute_coverage_metrics(ope_results)
-            for key, val in metrics.items():
-                row[f"{name}_{key}"] = float(val)
+            continue
 
-        all_tasks_rows.append(row)
+        try:
+            # Bandit simulations
+            bandit_data_list = run_bandit_simulations(
+                world, logging_config, n_simulations=simulations, n_jobs=n_jobs, seed=seed
+            )
 
-        t1 = time.time()
-        click.echo(f"  done in {t1 - t0:.1f}s")
+            # Target policies
+            train_size = len(bandit_data_list[0].X)
+            target_policies = {
+                "linear": make_target_policy(
+                    "contextual",
+                    world,
+                    outcome_model=LinearRegression(),
+                    train_sample_size=train_size,
+                ),
+                "tree": make_target_policy(
+                    "contextual",
+                    world,
+                    outcome_model=DecisionTreeRegressor(),
+                    train_sample_size=train_size,
+                ),
+                "arm0": make_target_policy("non_contextual_constant_0", world),
+                "arm1": make_target_policy("non_contextual_constant_1", world),
+            }
+
+            row: dict = {"task_id": tid}
+            for name, policy in target_policies.items():
+                ope_results = run_ope_simulations(
+                    bandit_data_list,
+                    world,
+                    policy,
+                    outcome_model=LinearRegression(),
+                    n_jobs=n_jobs,
+                )
+                metrics = compute_coverage_metrics(ope_results)
+                for key, val in metrics.items():
+                    row[f"{name}_{key}"] = float(val)
+
+            all_tasks_rows.append(row)
+
+            t1 = time.time()
+            click.echo(f"  done in {t1 - t0:.1f}s")
+
+        except RuntimeError as exc:
+            click.echo(f"  Skipping — {exc}")
+        finally:
+            gc.collect()
 
     df = pd.DataFrame(all_tasks_rows)
     out_path = output_dir / "all_tasks_df_data"
