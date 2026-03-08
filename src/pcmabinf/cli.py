@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import gc
-import pickle
 import time
 from pathlib import Path
 
 import click
-import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeRegressor

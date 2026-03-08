@@ -37,9 +37,6 @@ class OPEEstimator:
         n_folds: int = 4,
     ) -> None:
         self.data = data
-        self.world = world
-        self.target_policy = target_policy
-        self.n_folds = n_folds
 
         arm_count = world.arm_count
         N = len(data.A)

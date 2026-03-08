@@ -8,8 +8,6 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
-from pcmabinf.metrics import ESTIMATOR_FIELDS
-
 # Human-readable display labels for each estimator field name.
 _DISPLAY: dict[str, str] = {
     "truth": "Truth",
