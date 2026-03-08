@@ -34,7 +34,7 @@ def test_run_ope_simulations_count(world: OpenMLCC18World, small_config: Logging
     bandit_data_list = run_bandit_simulations(world, small_config, n_simulations=3, n_jobs=1)
     policy = UniformPolicy(arm_count=world.arm_count)
     results = run_ope_simulations(
-        bandit_data_list, world, policy, LinearRegression(), n_folds=2, n_jobs=1
+        bandit_data_list, world, policy, LinearRegression(), n_folds=3, n_jobs=1
     )
     assert len(results) == 3
     assert all(isinstance(r, OPEResult) for r in results)
@@ -46,7 +46,7 @@ def test_run_ope_simulations_all_fields_set(
     bandit_data_list = run_bandit_simulations(world, small_config, n_simulations=2, n_jobs=1)
     policy = UniformPolicy(arm_count=world.arm_count)
     results = run_ope_simulations(
-        bandit_data_list, world, policy, LinearRegression(), n_folds=2, n_jobs=1
+        bandit_data_list, world, policy, LinearRegression(), n_folds=3, n_jobs=1
     )
     for r in results:
         assert r.truth is not None

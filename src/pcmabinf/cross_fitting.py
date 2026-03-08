@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import itertools
-from copy import deepcopy
-
 import numpy as np
 from numpy.typing import NDArray
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, clone
 
 from pcmabinf._utils import predict
 from pcmabinf.data import BanditData
@@ -32,7 +29,7 @@ def cross_fitting(
     arm_count:
         Number of arms K.
     n_folds:
-        Number of cross-fitting folds (default 4).
+        Number of cross-fitting folds (must be >= 3; default 4).
 
     Returns
     -------
@@ -42,7 +39,19 @@ def cross_fitting(
         Predictions from model weighted by ``g*(a|x)(1-g(a|x)) / g(a|x)^2``.
     Q_CAMRDR : (N, K)
         Predictions from model weighted by ``g*(a|x) / g(a|x)``.
+
+    Raises
+    ------
+    ValueError
+        If ``n_folds < 3``.  The fold-exclusion scheme (skips fold k and k+1)
+        leaves fold 0 with an empty training set when ``n_folds == 2``.
     """
+    if n_folds < 3:
+        raise ValueError(
+            f"n_folds must be >= 3 (the fold-exclusion scheme produces an empty "
+            f"training set for fold 0 when n_folds == 2), got {n_folds}"
+        )
+
     N = len(data.X)
     fold_size = N // n_folds
 
@@ -51,19 +60,18 @@ def cross_fitting(
     Q_CAMRDR = np.zeros((N, arm_count), dtype=np.float64)
 
     for k in range(n_folds):
-        # All folds except k (and k+1 per original notebook — note: original
-        # uses "k+2" which skips adjacent fold; we replicate that behaviour).
+        # Exclude fold k and fold k+1 (replicates original notebook behaviour).
         valid_folds = [v for v in range(n_folds) if v != k and v != k + 1]
-        train_idx = list(
-            itertools.chain.from_iterable(
-                range(v * fold_size, (v + 1) * fold_size) for v in valid_folds
-            )
+        train_idx = (
+            np.concatenate([np.arange(v * fold_size, (v + 1) * fold_size) for v in valid_folds])
+            if valid_folds
+            else np.array([], dtype=np.intp)
         )
-        # Last fold absorbs remainder
+        # Last fold absorbs remainder rows so no data is left out.
         eval_idx = (
-            list(range(k * fold_size, N))
+            np.arange(k * fold_size, N)
             if k == n_folds - 1
-            else list(range(k * fold_size, (k + 1) * fold_size))
+            else np.arange(k * fold_size, (k + 1) * fold_size)
         )
 
         A_train = data.A[train_idx]
@@ -83,16 +91,18 @@ def cross_fitting(
             g_star_a = target_policy.pi(X_train[idx_a])[:, a]
 
             # --- Unweighted DM model ---
-            m = deepcopy(outcome_model)
+            m = clone(outcome_model)
             m.fit(X_a, Y_a)
             Q[eval_idx, a] = predict(m, X_eval)
 
             # --- MRDR model: w = g*(a|x)(1-g(a|x)) / g(a|x)^2 ---
+            # When g_star_a is all-zero the target policy never selects this arm,
+            # so the weighted model is undefined; fall back to unit weights.
             if np.all(g_star_a == 0):
                 w_mrdr = np.ones_like(Y_a)
             else:
                 w_mrdr = g_star_a * (1.0 - g_a) / (g_a**2)
-            m_mrdr = deepcopy(outcome_model)
+            m_mrdr = clone(outcome_model)
             m_mrdr.fit(X_a, Y_a, sample_weight=w_mrdr)
             Q_MRDR[eval_idx, a] = predict(m_mrdr, X_eval)
 
@@ -101,7 +111,7 @@ def cross_fitting(
                 w_camrdr = np.ones_like(Y_a)
             else:
                 w_camrdr = g_star_a / g_a
-            m_camrdr = deepcopy(outcome_model)
+            m_camrdr = clone(outcome_model)
             m_camrdr.fit(X_a, Y_a, sample_weight=w_camrdr)
             Q_CAMRDR[eval_idx, a] = predict(m_camrdr, X_eval)
 

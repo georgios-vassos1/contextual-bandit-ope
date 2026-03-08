@@ -15,6 +15,4 @@ class ExperimentConfig:
     epsilon_multiplier: float = 0.01
     simulation_count: int = 64
     n_jobs: int = -1
-    task_min_samples: int = 0
-    task_max_contexts: int = 100
     output_dir: Path = field(default_factory=lambda: Path("results"))

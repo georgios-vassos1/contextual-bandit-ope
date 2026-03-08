@@ -10,6 +10,12 @@ from pcmabinf.data import BanditData
 from pcmabinf.policy import UniformPolicy
 
 
+def test_n_folds_too_small_raises(simple_bandit_data: BanditData) -> None:
+    policy = UniformPolicy(arm_count=3)
+    with pytest.raises(ValueError, match="n_folds"):
+        cross_fitting(simple_bandit_data, policy, LinearRegression(), arm_count=3, n_folds=2)
+
+
 def test_output_shapes(simple_bandit_data: BanditData) -> None:
     N = len(simple_bandit_data.X)
     K = 3

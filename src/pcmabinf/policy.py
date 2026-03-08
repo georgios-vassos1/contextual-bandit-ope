@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Protocol
 
 import numpy as np
 from numpy.typing import NDArray
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, clone
+from sklearn.dummy import DummyRegressor
 
 from pcmabinf._utils import predict
 from pcmabinf.world import OpenMLCC18World
@@ -47,9 +47,11 @@ class MostFrequentPolicy:
     """Always selects the most frequent arm (by label frequency) with probability 1."""
 
     def __init__(self, world: OpenMLCC18World) -> None:
-        _labels, _counts = np.unique(world.arms, return_counts=True)
+        labels, counts = np.unique(world.arms, return_counts=True)
         self._assignment = np.zeros(world.arm_count, dtype=np.float64)
-        self._assignment[int(np.argmax(_counts))] = 1.0
+        # Use labels[argmax] so the correct arm slot is set even for non-contiguous labels.
+        most_frequent_arm = int(labels[np.argmax(counts)])
+        self._assignment[most_frequent_arm] = 1.0
 
     def pi(self, X: NDArray[np.float64]) -> NDArray[np.float64]:
         return np.tile(self._assignment, (len(X), 1))
@@ -59,8 +61,11 @@ class FrequencyPolicy:
     """Selects arms proportional to their frequency in the dataset labels."""
 
     def __init__(self, world: OpenMLCC18World) -> None:
-        _labels, _counts = np.unique(world.arms, return_counts=True)
-        self._assignment = _counts.astype(np.float64) / _counts.sum()
+        labels, counts = np.unique(world.arms, return_counts=True)
+        freq = counts.astype(np.float64) / counts.sum()
+        self._assignment = np.zeros(world.arm_count, dtype=np.float64)
+        # Index by actual label values to handle non-contiguous arm labels correctly.
+        self._assignment[labels.astype(int)] = freq
 
     def pi(self, X: NDArray[np.float64]) -> NDArray[np.float64]:
         return np.tile(self._assignment, (len(X), 1))
@@ -83,16 +88,20 @@ class ContextualPolicy:
         self._models: list[BaseEstimator] = []
         for a in range(self._arm_count):
             idx = np.where(arms == a)[0]
-            model_a = deepcopy(outcome_model)
-            model_a.fit(contexts[idx], rewards[idx])
-            self._models.append(model_a)
+            if len(idx) == 0:
+                # No training data for this arm; predict 0.0 so it is never preferred.
+                m: BaseEstimator = DummyRegressor(strategy="constant", constant=0.0)
+                m.fit(contexts[:1], np.array([0.0]))
+            else:
+                m = clone(outcome_model)
+                m.fit(contexts[idx], rewards[idx])
+            self._models.append(m)
 
     def pi(self, X: NDArray[np.float64]) -> NDArray[np.float64]:
         Y_hat = np.column_stack([predict(m, X) for m in self._models])
         best = np.argmax(Y_hat, axis=1)
         probs = np.zeros((len(X), self._arm_count), dtype=np.float64)
-        for i, a in enumerate(best):
-            probs[i, a] = 1.0
+        probs[np.arange(len(X)), best] = 1.0  # vectorised scatter; no Python loop
         return probs
 
 

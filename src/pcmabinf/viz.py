@@ -8,13 +8,27 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from pcmabinf.metrics import ESTIMATOR_FIELDS
+
+# Human-readable display labels for each estimator field name.
+_DISPLAY: dict[str, str] = {
+    "truth": "Truth",
+    "dm": "DM",
+    "ips": "IPS",
+    "dr": "DR",
+    "adr": "ADR",
+    "cadr": "CADR",
+    "mrdr": "MRDR",
+    "camrdr": "CAMRDR",
+}
+
 
 def bar_plot(
     data: NDArray[np.float64],
     metric: str,
     labels: list[str],
     truth: float | None = None,
-) -> None:
+) -> matplotlib.axes.Axes:
     """Bar chart of *metric* with error bars.
 
     Parameters
@@ -27,6 +41,11 @@ def bar_plot(
         Estimator names (length n_estimators).
     truth:
         If given, draw a horizontal dashed line at this value.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The axes object so the caller can further customise or save the figure.
     """
     mean_metric = np.mean(data, axis=1)
     stderr_metric = np.sqrt(np.var(data, axis=1) / data.shape[1])
@@ -37,42 +56,60 @@ def bar_plot(
 
     cmap = matplotlib.colormaps["tab10"]
     colors = [cmap(i) for i in range(len(data))]
-    plt.bar(x=range(len(data)), color=colors, height=mean_metric, yerr=stderr_metric)
-    plt.xticks(range(len(data)), [l.upper() for l in labels], rotation=90)
+    fig, ax = plt.subplots()
+    ax.bar(x=range(len(data)), color=colors, height=mean_metric, yerr=stderr_metric)
+    ax.set_xticks(range(len(data)))
+    ax.set_xticklabels([lbl.upper() for lbl in labels], rotation=90)
     if truth is not None:
-        plt.axhline(y=truth, color="black", linestyle="--")
-    plt.ylabel(metric)
-    plt.show()
+        ax.axhline(y=truth, color="black", linestyle="--")
+    ax.set_ylabel(metric)
+    return ax
 
 
 def visualize_coverage(
     results_path: Path,
     output_path: Path | None = None,
-) -> None:
-    """Scatter-plot grid: CADR vs DM/IPW/DR/ADR/MRDR for each target policy.
+    target_policies: list[str] | None = None,
+    competitors: list[str] | None = None,
+    main: str = "cadr",
+) -> matplotlib.figure.Figure:
+    """Scatter-plot grid: *main* estimator vs each *competitor* for each target policy.
+
+    Reads a pickled DataFrame produced by ``pcmabinf run``.  Each row in the
+    DataFrame corresponds to one task; columns are named
+    ``{policy}_{estimator}_mean`` and ``{policy}_{estimator}_stderr``.
 
     Parameters
     ----------
     results_path:
-        Path to a pickled DataFrame produced by the ``run`` CLI command (the
-        ``all_tasks_df_data`` file).
+        Path to the pickled results DataFrame.
     output_path:
-        If given, save the figure to this path instead of displaying it.
+        If given, save the figure to this path instead of returning it.
+    target_policies:
+        Policy names to plot (default: ``["linear", "tree", "arm0", "arm1"]``).
+    competitors:
+        Estimator field names to plot on the x-axis
+        (default: ``["dm", "ips", "dr", "adr", "mrdr"]``).
+    main:
+        Estimator field name for the y-axis (default: ``"cadr"``).
+
+    Returns
+    -------
+    matplotlib.figure.Figure
     """
+    if target_policies is None:
+        target_policies = ["linear", "tree", "arm0", "arm1"]
+    if competitors is None:
+        competitors = ["dm", "ips", "dr", "adr", "mrdr"]
+
+    target_policy_names = {
+        "linear": "linear contextual\ntarget policy",
+        "tree": "tree contextual\ntarget policy",
+        "arm0": "arm 0 non-contextual\ntarget policy",
+        "arm1": "arm 1 non-contextual\ntarget policy",
+    }
+
     data = pd.read_pickle(results_path)
-
-    estimators = ["Truth", "DM", "IPW", "DR", "ADR", "CADR", "MRDR", "CAMRDR"]
-    target_policies = ["linear", "tree", "arm0", "arm1"]
-    target_policy_names = [
-        "linear contextual\ntarget policy",
-        "tree contextual\ntarget policy",
-        "arm 0 non-contextual\ntarget policy",
-        "arm 1 non-contextual\ntarget policy",
-    ]
-    est_dict = {name: i for i, name in enumerate(estimators)}
-
-    competitors = ["DM", "IPW", "DR", "ADR", "MRDR"]
-    main = "CADR"
 
     fontsize = 16
     size = 3
@@ -83,38 +120,44 @@ def visualize_coverage(
     )
     fig.subplots_adjust(top=0.99, bottom=0.01, hspace=0.5, wspace=0.5)
 
-    for t, target_policy in enumerate(target_policies):
-        mean = np.array(data[f"{target_policy}_coverage_95_mean"].to_list())
-        stderr = np.array(data[f"{target_policy}_coverage_95_stderr"].to_list())
+    for t, tp in enumerate(target_policies):
+        # Each column is a scalar per task; collect as arrays over tasks.
+        mean_main = data[f"{tp}_{main}_mean"].to_numpy(dtype=float)
+        stderr_main = data[f"{tp}_{main}_stderr"].to_numpy(dtype=float)
 
-        e2 = est_dict[main]
-        for i1, e1 in enumerate(est_dict[c] for c in competitors):
+        for i1, comp in enumerate(competitors):
             ax = axs[t][i1]
-            colors_list = []
-            for i in range(len(mean[:, e1])):
-                x = mean[i, e1]
-                y = mean[i, e2]
-                xerr = stderr[i, e1]
-                yerr = stderr[i, e2]
-                if abs(x - y) <= xerr + yerr:
-                    colors_list.append([0, 0, 0])
-                elif x > y:
-                    colors_list.append([1, 0, 0])
-                else:
-                    colors_list.append([0, 0, 1])
-            colors_arr = np.array(colors_list, dtype=float)
-            ax.scatter(x=mean[:, e1], y=mean[:, e2], zorder=3, c=colors_arr, s=50, alpha=0.5)
+
+            mean_comp = data[f"{tp}_{comp}_mean"].to_numpy(dtype=float)
+            stderr_comp = data[f"{tp}_{comp}_stderr"].to_numpy(dtype=float)
+
+            # Color: black = overlap, red = competitor better, blue = main better.
+            diff = mean_comp - mean_main
+            combined_err = stderr_comp + stderr_main
+            colors_arr = np.where(
+                np.abs(diff)[:, None] <= combined_err[:, None],
+                [[0, 0, 0]],
+                np.where(diff[:, None] > 0, [[1, 0, 0]], [[0, 0, 1]]),
+            ).astype(float)
+
+            ax.scatter(x=mean_comp, y=mean_main, zorder=3, c=colors_arr, s=50, alpha=0.5)
             ax.errorbar(
-                x=mean[:, e1],
-                y=mean[:, e2],
-                xerr=stderr[:, e1],
-                yerr=stderr[:, e2],
+                x=mean_comp,
+                y=mean_main,
+                xerr=stderr_comp,
+                yerr=stderr_main,
                 c="black",
                 zorder=0,
                 fmt="none",
             )
-            ax.set_xlabel(f"{estimators[e1]} 95% CI Coverage", fontsize=fontsize)
-            ax.set_ylabel(f"{estimators[e2]} 95% CI Coverage", fontsize=fontsize)
+            ax.set_xlabel(
+                f"{_DISPLAY.get(comp, comp.upper())} {int(ci_pct(0.95))}% CI Coverage",
+                fontsize=fontsize,
+            )
+            ax.set_ylabel(
+                f"{_DISPLAY.get(main, main.upper())} {int(ci_pct(0.95))}% CI Coverage",
+                fontsize=fontsize,
+            )
             ax.tick_params(axis="both", which="major", labelsize=fontsize - 4)
             ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
             ax.set_yticks([0, 0.25, 0.5, 0.75, 1])
@@ -123,9 +166,13 @@ def visualize_coverage(
             ax.axhline(y=0.95, linestyle="--", color="black")
             ax.axvline(x=0.95, linestyle="--", color="black")
             ax.axline(xy1=(0, 0), xy2=(10, 10), linestyle="-", color="black", alpha=0.3)
-            ax.set_title(target_policy_names[t], fontsize=fontsize)
+            ax.set_title(target_policy_names.get(tp, tp), fontsize=fontsize)
 
     if output_path is not None:
         fig.savefig(output_path)
-    else:
-        plt.show()
+    return fig
+
+
+def ci_pct(ci_level: float) -> float:
+    """Convert a coverage fraction (e.g. 0.95) to a percentage (95.0)."""
+    return ci_level * 100.0

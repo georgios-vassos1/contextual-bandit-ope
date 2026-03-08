@@ -23,6 +23,9 @@ class OpenMLCC18World:
         data_dir: Path,
         reward_variance: float = 0.0,
     ) -> None:
+        if reward_variance < 0:
+            raise ValueError(f"reward_variance must be >= 0, got {reward_variance}")
+
         self.task_id = task_id
         self.reward_variance = reward_variance
 
@@ -37,7 +40,7 @@ class OpenMLCC18World:
         self._feature_count: int = int(contexts.shape[1])
         self._observation_count: int = int(contexts.shape[0])
 
-        shuffle = np.argsort(np.random.random(size=self._observation_count))
+        shuffle = np.random.permutation(self._observation_count)
         self.contexts: NDArray[np.float64] = contexts[shuffle].astype(np.float64)
         self.arms: NDArray[np.intp] = arms[shuffle].astype(np.intp)
 

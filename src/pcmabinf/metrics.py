@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -13,7 +15,7 @@ def compute_coverage_metrics(
     estimators: list[str] = ESTIMATOR_FIELDS,
     ci_level: float = 0.95,
 ) -> dict[str, NDArray[np.float64]]:
-    """Compute 95 % CI coverage for each estimator relative to truth.
+    """Compute CI coverage for each estimator relative to truth.
 
     For each simulation replicate *s* and estimator *e*, a CI is formed as::
 
@@ -36,31 +38,62 @@ def compute_coverage_metrics(
     dict
         Keys ``'{estimator}_mean'`` and ``'{estimator}_stderr'`` for each
         estimator in *estimators*.  Values are scalars wrapped in 0-d arrays.
+
+    Raises
+    ------
+    ValueError
+        If ``ci_level`` is not in (0, 1).
+    ValueError
+        If all results for ``'truth'`` are ``None``.
     """
+    if not (0.0 < ci_level < 1.0):
+        raise ValueError(f"ci_level must be in (0, 1), got {ci_level}")
+
     from scipy.stats import norm  # local import to avoid top-level dependency at import time
 
     z = float(norm.ppf(0.5 + ci_level / 2.0))
     S = len(ope_results)
 
-    # Collect (mean, variance) for each estimator across simulations
-    all_results: dict[str, NDArray[np.float64]] = {}
-    for name in estimators:
-        vals = np.array(
-            [getattr(r, name) for r in ope_results if getattr(r, name) is not None],
-            dtype=np.float64,
-        )
-        all_results[name] = vals  # shape (S, 2)
+    # Collect raw (mean, variance) tuples and record which indices are valid.
+    raw_by_name: dict[str, list[tuple[float, float] | None]] = {
+        name: [getattr(r, name) for r in ope_results] for name in estimators
+    }
 
-    truth_means = all_results["truth"][:, 0]  # shape (S,)
+    # Warn about None entries per estimator.
+    for name in estimators:
+        n_none = sum(v is None for v in raw_by_name[name])
+        if n_none > 0:
+            warnings.warn(
+                f"{n_none}/{S} OPEResult entries have {name}=None and will be excluded "
+                f"from coverage computation.",
+                stacklevel=2,
+            )
+        if all(v is None for v in raw_by_name[name]):
+            raise ValueError(f"No valid results for estimator '{name}'")
 
     out: dict[str, NDArray[np.float64]] = {}
+    truth_raw = raw_by_name["truth"]
+
     for name in estimators:
-        vals = all_results[name]
-        means = vals[:, 0]
-        stds = np.sqrt(np.maximum(vals[:, 1], 0.0))
+        # Use only replicates where BOTH truth and the current estimator are non-None.
+        pairs = [
+            (t, e)
+            for t, e in zip(truth_raw, raw_by_name[name])
+            if t is not None and e is not None
+        ]
+        if len(pairs) == 0:
+            raise ValueError(f"No replicates with valid results for both 'truth' and '{name}'")
+
+        truth_arr = np.array([p[0] for p in pairs], dtype=np.float64)
+        est_arr = np.array([p[1] for p in pairs], dtype=np.float64)
+
+        truth_means = truth_arr[:, 0]
+        means = est_arr[:, 0]
+        stds = np.sqrt(np.maximum(est_arr[:, 1], 0.0))
         lo = means - z * stds
         hi = means + z * stds
         covered = ((lo <= truth_means) & (truth_means <= hi)).astype(np.float64)
+        n = len(covered)
         out[f"{name}_mean"] = np.array(np.mean(covered))
-        out[f"{name}_stderr"] = np.array(np.sqrt(np.var(covered) / S))
+        out[f"{name}_stderr"] = np.array(np.sqrt(np.var(covered) / n))
     return out

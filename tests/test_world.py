@@ -7,6 +7,12 @@ import pytest
 from pcmabinf.world import OpenMLCC18World
 
 
+def test_negative_reward_variance_raises(tmp_data_dir: "Path") -> None:
+    from pathlib import Path
+    with pytest.raises(ValueError, match="reward_variance"):
+        OpenMLCC18World(task_id="999", data_dir=tmp_data_dir, reward_variance=-0.1)
+
+
 def test_world_properties(world: OpenMLCC18World) -> None:
     assert world.arm_count == 3
     assert world.feature_count == 4
