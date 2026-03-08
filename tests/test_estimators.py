@@ -62,10 +62,10 @@ def test_truth_variance_is_zero(world: OpenMLCC18World) -> None:
     assert result.truth[1] == pytest.approx(0.0)
 
 
-def test_mean_and_variance_uniform() -> None:
+def test_summarise_uniform() -> None:
     """Unweighted mean/variance should match numpy."""
     D = np.array([1.0, 2.0, 3.0, 4.0])
-    mean, var = OPEEstimator._mean_and_variance(D)
+    mean, var = OPEEstimator._summarise(D)
     assert mean == pytest.approx(np.mean(D))
     # variance = mean of (D - mean)^2 / N  (formula uses 1/N^2 * sum(D-mean)^2)
     expected_var = np.mean((D - np.mean(D)) ** 2) / len(D)

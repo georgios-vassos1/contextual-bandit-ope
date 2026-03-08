@@ -1,11 +1,11 @@
-"""Tests for _utils.predict()."""
+"""Tests for _utils.score()."""
 from __future__ import annotations
 
 import numpy as np
 import pytest
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
-from pcmabinf._utils import predict
+from pcmabinf._utils import score
 
 
 def _fit_classifier(X: np.ndarray, y: np.ndarray) -> DecisionTreeClassifier:
@@ -14,13 +14,13 @@ def _fit_classifier(X: np.ndarray, y: np.ndarray) -> DecisionTreeClassifier:
     return clf
 
 
-def test_regressor_predict() -> None:
+def test_regressor_score() -> None:
     rng = np.random.default_rng(0)
     X = rng.standard_normal((50, 3))
     y = rng.standard_normal(50)
     model = DecisionTreeRegressor(random_state=0)
     model.fit(X, y)
-    out = predict(model, X)
+    out = score(model, X)
     assert out.shape == (50,)
     np.testing.assert_allclose(out, model.predict(X))
 
@@ -31,7 +31,7 @@ def test_classifier_multiclass_predict_proba() -> None:
     X = rng.standard_normal((60, 3))
     y = (X[:, 0] > 0).astype(int)  # two classes guaranteed
     clf = _fit_classifier(X, y)
-    out = predict(clf, X)
+    out = score(clf, X)
     assert out.shape == (60,)
     np.testing.assert_allclose(out, clf.predict_proba(X)[:, 1])
 
@@ -47,6 +47,6 @@ def test_classifier_single_class_returns_constant() -> None:
     assert len(clf.classes_) == 1
 
     X_test = rng.standard_normal((10, 3))
-    out = predict(clf, X_test)
+    out = score(clf, X_test)
     assert out.shape == (10,)
     np.testing.assert_array_equal(out, np.zeros(10))

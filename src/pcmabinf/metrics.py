@@ -52,48 +52,48 @@ def compute_coverage_metrics(
     from scipy.stats import norm  # local import to avoid top-level dependency at import time
 
     z = float(norm.ppf(0.5 + ci_level / 2.0))
-    S = len(ope_results)
+    n_reps = len(ope_results)
 
     # Collect raw (mean, variance) tuples and record which indices are valid.
-    raw_by_name: dict[str, list[tuple[float, float] | None]] = {
+    estimator_vals: dict[str, list[tuple[float, float] | None]] = {
         name: [getattr(r, name) for r in ope_results] for name in estimators
     }
 
     # Warn about None entries per estimator.
     for name in estimators:
-        n_none = sum(v is None for v in raw_by_name[name])
+        n_none = sum(v is None for v in estimator_vals[name])
         if n_none > 0:
             warnings.warn(
-                f"{n_none}/{S} OPEResult entries have {name}=None and will be excluded "
+                f"{n_none}/{n_reps} OPEResult entries have {name}=None and will be excluded "
                 f"from coverage computation.",
                 stacklevel=2,
             )
-        if all(v is None for v in raw_by_name[name]):
+        if all(v is None for v in estimator_vals[name]):
             raise ValueError(f"No valid results for estimator '{name}'")
 
     out: dict[str, NDArray[np.float64]] = {}
-    truth_raw = raw_by_name["truth"]
+    truth_vals = estimator_vals["truth"]
 
     for name in estimators:
         # Use only replicates where BOTH truth and the current estimator are non-None.
-        pairs = [
+        aligned = [
             (t, e)
-            for t, e in zip(truth_raw, raw_by_name[name])
+            for t, e in zip(truth_vals, estimator_vals[name])
             if t is not None and e is not None
         ]
-        if len(pairs) == 0:
+        if len(aligned) == 0:
             raise ValueError(f"No replicates with valid results for both 'truth' and '{name}'")
 
-        truth_arr = np.array([p[0] for p in pairs], dtype=np.float64)
-        est_arr = np.array([p[1] for p in pairs], dtype=np.float64)
+        t_arr = np.array([p[0] for p in aligned], dtype=np.float64)
+        e_arr = np.array([p[1] for p in aligned], dtype=np.float64)
 
-        truth_means = truth_arr[:, 0]
-        means = est_arr[:, 0]
-        stds = np.sqrt(np.maximum(est_arr[:, 1], 0.0))
-        lo = means - z * stds
-        hi = means + z * stds
-        covered = ((lo <= truth_means) & (truth_means <= hi)).astype(np.float64)
-        n = len(covered)
-        out[f"{name}_mean"] = np.array(np.mean(covered))
-        out[f"{name}_stderr"] = np.array(np.sqrt(np.var(covered) / n))
+        truth_means = t_arr[:, 0]
+        est_means = e_arr[:, 0]
+        stds = np.sqrt(np.maximum(e_arr[:, 1], 0.0))
+        lo = est_means - z * stds
+        hi = est_means + z * stds
+        hits = ((lo <= truth_means) & (truth_means <= hi)).astype(np.float64)
+        n_valid = len(hits)
+        out[f"{name}_mean"] = np.array(np.mean(hits))
+        out[f"{name}_stderr"] = np.array(np.sqrt(np.var(hits) / n_valid))
     return out

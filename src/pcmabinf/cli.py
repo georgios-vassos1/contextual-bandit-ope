@@ -69,7 +69,7 @@ def run_cmd(
     logging_config = LoggingConfig(
         batch_count=batch_count,
         batch_size=batch_size,
-        strategy="contextual_epsilon_greedy",
+        strategy="greedy",
         epsilon_multiplier=epsilon_multiplier,
         outcome_model=DecisionTreeRegressor(),
     )

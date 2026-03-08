@@ -15,7 +15,7 @@ from pcmabinf.world import OpenMLCC18World
 
 @pytest.fixture()
 def small_config() -> LoggingConfig:
-    return LoggingConfig(batch_count=3, batch_size=20, strategy="uniform_random")
+    return LoggingConfig(batch_count=3, batch_size=20, strategy="uniform")
 
 
 def test_run_bandit_simulations_count(world: OpenMLCC18World, small_config: LoggingConfig) -> None:

@@ -4,12 +4,12 @@ import numpy as np
 from numpy.typing import NDArray
 from sklearn.base import BaseEstimator, clone
 
-from pcmabinf._utils import predict
+from pcmabinf._utils import score
 from pcmabinf.data import BanditData
 from pcmabinf.policy import TargetPolicyProtocol
 
 
-def cross_fitting(
+def estimate_outcome_models(
     data: BanditData,
     target_policy: TargetPolicyProtocol,
     outcome_model: BaseEstimator,
@@ -23,7 +23,7 @@ def cross_fitting(
     data:
         Bandit data collected by the logging policy.
     target_policy:
-        Policy whose probability matrix is used to compute MRDR/CAMRDR weights.
+        Policy whose probability matrix drives the MRDR/CAMRDR sample weights.
     outcome_model:
         Sklearn-compatible estimator (cloned per arm per fold).
     arm_count:
@@ -36,9 +36,11 @@ def cross_fitting(
     Q : (N, K)
         Unweighted outcome model predictions.
     Q_MRDR : (N, K)
-        Predictions from model weighted by ``g*(a|x)(1-g(a|x)) / g(a|x)^2``.
+        Predictions from model trained with MRDR importance weights
+        ``g*(a|x) * (1 - g(a|x)) / g(a|x)**2``.
     Q_CAMRDR : (N, K)
-        Predictions from model weighted by ``g*(a|x) / g(a|x)``.
+        Predictions from model trained with CAMRDR importance weights
+        ``g*(a|x) / g(a|x)``.
 
     Raises
     ------
@@ -60,59 +62,67 @@ def cross_fitting(
     Q_CAMRDR = np.zeros((N, arm_count), dtype=np.float64)
 
     for k in range(n_folds):
-        # Exclude fold k and fold k+1 (replicates original notebook behaviour).
-        valid_folds = [v for v in range(n_folds) if v != k and v != k + 1]
-        train_idx = (
-            np.concatenate([np.arange(v * fold_size, (v + 1) * fold_size) for v in valid_folds])
-            if valid_folds
+        # Training folds: all folds except fold k (evaluation) and fold k+1 (hold-out).
+        # Out-of-range indices are silently ignored by the set membership test,
+        # so the final fold trains on all remaining folds except itself.
+        skip = frozenset((k, k + 1))
+        train_folds = [f for f in range(n_folds) if f not in skip]
+        tr_idx = (
+            np.concatenate([np.arange(f * fold_size, (f + 1) * fold_size) for f in train_folds])
+            if train_folds
             else np.array([], dtype=np.intp)
         )
-        # Last fold absorbs remainder rows so no data is left out.
-        eval_idx = (
+        # The last evaluation fold absorbs any remainder rows.
+        ev_idx = (
             np.arange(k * fold_size, N)
             if k == n_folds - 1
             else np.arange(k * fold_size, (k + 1) * fold_size)
         )
 
-        A_train = data.A[train_idx]
-        X_train = data.X[train_idx]
-        Y_train = data.Y[train_idx]
-        P_train = data.P[train_idx]
-        X_eval = data.X[eval_idx]
+        A_train = data.A[tr_idx]
+        X_train = data.X[tr_idx]
+        Y_train = data.Y[tr_idx]
+        P_train = data.P[tr_idx]
+        X_eval = data.X[ev_idx]
 
-        # Compute target-policy probabilities once for the entire training fold
-        # instead of calling pi() K times on different arm subsets.
-        g_star_train = target_policy.pi(X_train)  # (n_train, K)
+        # Compute target-policy probabilities once for the entire training fold.
+        pi_train = target_policy.pi(X_train)  # (n_train, K)
 
         for a in range(arm_count):
-            idx_a = np.where(A_train == a)[0]
-            if len(idx_a) == 0:
+            arm_rows = np.where(A_train == a)[0]
+            if len(arm_rows) == 0:
                 continue
 
-            X_a = X_train[idx_a]
-            Y_a = Y_train[idx_a]
-            g_a = P_train[idx_a]
-            g_star_a = g_star_train[idx_a, a]
+            X_a = X_train[arm_rows]
+            Y_a = Y_train[arm_rows]
+            g_a = P_train[arm_rows]
+            g_star_a = pi_train[arm_rows, a]
 
-            # --- Unweighted DM model ---
-            m = clone(outcome_model)
-            m.fit(X_a, Y_a)
-            Q[eval_idx, a] = predict(m, X_eval)
+            # Unweighted direct-method model.
+            dm_mod = clone(outcome_model)
+            dm_mod.fit(X_a, Y_a)
+            Q[ev_idx, a] = score(dm_mod, X_eval)
 
-            # When g_star_a is all-zero the target policy never selects this arm,
-            # so the weighted models are undefined; fall back to unit weights.
-            all_zero_g_star = np.all(g_star_a == 0)
+            # When the target policy assigns zero probability to arm *a*, the
+            # importance-weighted objectives are degenerate; use unit weights.
+            degenerate = np.all(g_star_a == 0)
 
-            # --- MRDR model: w = g*(a|x)(1-g(a|x)) / g(a|x)^2 ---
-            w_mrdr = np.ones_like(Y_a) if all_zero_g_star else g_star_a * (1.0 - g_a) / (g_a**2)
-            m_mrdr = clone(outcome_model)
-            m_mrdr.fit(X_a, Y_a, sample_weight=w_mrdr)
-            Q_MRDR[eval_idx, a] = predict(m_mrdr, X_eval)
+            # MRDR model: minimises a variance-penalised weighted squared loss.
+            sw_mrdr = (
+                np.ones_like(Y_a) if degenerate
+                else g_star_a * (1.0 - g_a) / (g_a ** 2)
+            )
+            mrdr_mod = clone(outcome_model)
+            mrdr_mod.fit(X_a, Y_a, sample_weight=sw_mrdr)
+            Q_MRDR[ev_idx, a] = score(mrdr_mod, X_eval)
 
-            # --- CAMRDR model: w = g*(a|x) / g(a|x) ---
-            w_camrdr = np.ones_like(Y_a) if all_zero_g_star else g_star_a / g_a
-            m_camrdr = clone(outcome_model)
-            m_camrdr.fit(X_a, Y_a, sample_weight=w_camrdr)
-            Q_CAMRDR[eval_idx, a] = predict(m_camrdr, X_eval)
+            # CAMRDR model: minimises a density-ratio weighted squared loss.
+            sw_camrdr = (
+                np.ones_like(Y_a) if degenerate
+                else g_star_a / g_a
+            )
+            camrdr_mod = clone(outcome_model)
+            camrdr_mod.fit(X_a, Y_a, sample_weight=sw_camrdr)
+            Q_CAMRDR[ev_idx, a] = score(camrdr_mod, X_eval)
 
     return Q, Q_MRDR, Q_CAMRDR

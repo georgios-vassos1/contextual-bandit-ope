@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 from sklearn.base import BaseEstimator
 
-from pcmabinf.cross_fitting import cross_fitting
+from pcmabinf.cross_fitting import estimate_outcome_models
 from pcmabinf.data import BanditData, OPEResult
 from pcmabinf.policy import TargetPolicyProtocol
 from pcmabinf.world import OpenMLCC18World
@@ -44,8 +44,8 @@ class OPEEstimator:
         arm_count = world.arm_count
         N = len(data.A)
 
-        # Cross-fitting — no duplication of this logic elsewhere
-        Q, Q_MRDR, Q_CAMRDR = cross_fitting(
+        # Cross-fitted outcome model matrices: shape (N, K) each.
+        Q, Q_MRDR, Q_CAMRDR = estimate_outcome_models(
             data, target_policy, outcome_model, arm_count, n_folds
         )
 
@@ -59,21 +59,19 @@ class OPEEstimator:
         # Target policy action probabilities: (N, K)
         self._g_star: NDArray[np.float64] = target_policy.pi(data.X)
 
-        # True expected reward E[Y | A=a, X=x] under the world: (N, K)
-        # Vectorised: one dict-lookup per observation instead of K-element arrays.
+        # Oracle expected reward under the world: (N, K)
+        # One scatter write sets the optimal arm's column to 1; all others remain 0.
         optimal_arms = world.optimal_arms_batch(data.X)
         self._Y_true = np.zeros((N, arm_count), dtype=np.float64)
         self._Y_true[self._row_idx, optimal_arms] = 1.0
 
-        # Per-observation selected-arm quantities — computed once, reused everywhere.
-        # g*(a_i | x_i): probability the target policy assigns to the arm that was taken.
+        # Per-observation quantities indexed at the chosen arm — cached once.
         self._g_star_a: NDArray[np.float64] = self._g_star[self._row_idx, data.A]
-        # Q(x_i, a_i) for each outcome model variant.
-        self._Q_sel: NDArray[np.float64] = Q[self._row_idx, data.A]
-        self._Q_MRDR_sel: NDArray[np.float64] = Q_MRDR[self._row_idx, data.A]
-        self._Q_CAMRDR_sel: NDArray[np.float64] = Q_CAMRDR[self._row_idx, data.A]
+        self._q_taken: NDArray[np.float64] = Q[self._row_idx, data.A]
+        self._q_mrdr_taken: NDArray[np.float64] = Q_MRDR[self._row_idx, data.A]
+        self._q_camrdr_taken: NDArray[np.float64] = Q_CAMRDR[self._row_idx, data.A]
 
-        # Weighted sums over arms: V^(a)(x_i) = sum_a g*(a|x_i) Q(x_i,a)
+        # Policy-value weighted sums: V(x_i) = sum_a pi*(a|x_i) Q(x_i, a)
         self._Q_star = np.einsum("ij,ij->i", self._g_star, Q)
         self._Q_MRDR_star = np.einsum("ij,ij->i", self._g_star, Q_MRDR)
         self._Q_CAMRDR_star = np.einsum("ij,ij->i", self._g_star, Q_CAMRDR)
@@ -96,61 +94,62 @@ class OPEEstimator:
         )
 
     # ------------------------------------------------------------------
-    # Private estimators
+    # Estimators
     # ------------------------------------------------------------------
 
     def _truth(self) -> tuple[float, float]:
-        # Variance is 0 by definition: truth is the deterministic expected value.
-        mean, _ = self._mean_and_variance(self._Q0_star)
+        # Oracle: variance is zero by definition (expected value, not a sample).
+        mean, _ = self._summarise(self._Q0_star)
         return mean, 0.0
 
     def _dm(self) -> tuple[float, float]:
-        return self._mean_and_variance(self._Q_star)
+        return self._summarise(self._Q_star)
 
     def _ips(self) -> tuple[float, float]:
-        D = (self._g_star_a / self.data.P) * self.data.Y
-        return self._mean_and_variance(D)
+        phi = (self._g_star_a / self.data.P) * self.data.Y
+        return self._summarise(phi)
 
     def _dr(self) -> tuple[float, float]:
-        D = self._Q_star + (self._g_star_a / self.data.P) * (self.data.Y - self._Q_sel)
-        return self._mean_and_variance(D)
+        phi = self._Q_star + (self._g_star_a / self.data.P) * (self.data.Y - self._q_taken)
+        return self._summarise(phi)
 
     def _adr(self) -> tuple[float, float]:
-        # Weight w_i = sqrt(g(a_i|x_i)) — stabilises variance under low-propensity arms.
-        D = self._Q_star + (self._g_star_a / self.data.P) * (self.data.Y - self._Q_sel)
+        phi = self._Q_star + (self._g_star_a / self.data.P) * (self.data.Y - self._q_taken)
         w = np.sqrt(self.data.P)
-        return self._mean_and_variance(D, w)
+        return self._summarise(phi, w)
 
     def _cadr(self) -> tuple[float, float]:
-        return self._adaptive_dr(self._Q_star, self._Q_sel)
+        return self._adaptive_dr(self._Q_star, self._q_taken)
 
     def _mrdr(self) -> tuple[float, float]:
-        D = self._Q_MRDR_star + (self._g_star_a / self.data.P) * (self.data.Y - self._Q_MRDR_sel)
-        return self._mean_and_variance(D)
+        phi = (
+            self._Q_MRDR_star
+            + (self._g_star_a / self.data.P) * (self.data.Y - self._q_mrdr_taken)
+        )
+        return self._summarise(phi)
 
     def _camrdr(self) -> tuple[float, float]:
-        return self._adaptive_dr(self._Q_CAMRDR_star, self._Q_CAMRDR_sel)
+        return self._adaptive_dr(self._Q_CAMRDR_star, self._q_camrdr_taken)
 
     # ------------------------------------------------------------------
-    # Helper: adaptive doubly-robust (CADR / CAMRDR)
+    # Adaptive doubly-robust weighting (shared by CADR and CAMRDR)
     # ------------------------------------------------------------------
 
     def _adaptive_dr(
         self,
         Q_star: NDArray[np.float64],
-        Q_sel: NDArray[np.float64],  # pre-computed Q(x_i, a_i)
+        q_taken: NDArray[np.float64],
     ) -> tuple[float, float]:
-        """Generic CADR computation.
+        """Compute the CADR/CAMRDR estimator with observation-level adaptive weights.
 
-        w_i = 0                      if i == 0
-        w_i = 1/sqrt(sigma2_i)       otherwise, where sigma2_i is estimated
-              from previous observations using the per-batch propensity history.
+        For observation i, the weight is ``1 / sqrt(sigma2_i)`` where
+        ``sigma2_i`` is the empirical variance of the DR functional evaluated
+        over all observations before i using the propensity history entry for
+        i's batch.  Weight zero is assigned when the variance estimate is
+        non-positive.
 
-        Vectorized implementation: O(B) numpy passes instead of O(N²).
-
-        Key observation: batch_idx = i // bs is constant for all i in
-        [b*bs, (b+1)*bs), so ratio_s and D1_gt_s are constant within a batch.
-        cumsum lets us read off sigma2_i for every i in the batch at once.
+        Vectorised over observations within each batch using prefix cumsums,
+        giving O(B) passes instead of the naive O(N^2).
         """
         data = self.data
         P, Y = data.P, data.Y
@@ -158,19 +157,23 @@ class OPEEstimator:
         bs = data.batch_size
         B = len(data.propensity_history)
 
-        # D is fully vectorized — no loop needed.
-        D = Q_star + (self._g_star_a / P) * (Y - Q_sel)
-        w = np.zeros(N, dtype=np.float64)  # w[0] stays 0 by definition
+        # Full doubly-robust functional (vectorised).
+        phi = Q_star + (self._g_star_a / P) * (Y - q_taken)
+        w = np.zeros(N, dtype=np.float64)  # w[0] stays zero
 
         for b in range(B):
-            gt = data.propensity_history[b]   # shape: ((b+1)*bs,)
-            n_b = len(gt)
+            # Retroactive propensity under model b for all observations 0..n_b-1.
+            pi_b = data.propensity_history[b]
+            n_b = len(pi_b)
 
-            ratio = gt / P[:n_b]
-            D1 = Q_star[:n_b] + (self._g_star_a[:n_b] / gt) * (Y[:n_b] - Q_sel[:n_b])
+            # Importance-ratio weighted influence values for the prefix 0..n_b-1.
+            rho = pi_b / P[:n_b]
+            phi_b = Q_star[:n_b] + (self._g_star_a[:n_b] / pi_b) * (Y[:n_b] - q_taken[:n_b])
 
-            cs1 = np.cumsum(ratio * D1 ** 2)  # cumsum of psi1
-            cs2 = np.cumsum(ratio * D1)       # cumsum of psi2
+            # Prefix cumsums let us read off the mean and second moment at any
+            # index i in O(1) rather than re-summing from scratch.
+            cs1 = np.cumsum(rho * phi_b ** 2)
+            cs2 = np.cumsum(rho * phi_b)
 
             i_start = max(1, b * bs)
             i_end = min((b + 1) * bs, N)
@@ -178,30 +181,34 @@ class OPEEstimator:
                 continue
 
             idx = np.arange(i_start, i_end)
-            sigma2 = cs1[idx - 1] / idx - (cs2[idx - 1] / idx) ** 2
-            safe = np.where(sigma2 > 0.0, sigma2, 1.0)  # avoid sqrt(0) in inactive branch
-            w[idx] = np.where(sigma2 > 0.0, 1.0 / np.sqrt(safe), 0.0)
+            variance_est = cs1[idx - 1] / idx - (cs2[idx - 1] / idx) ** 2
+            # Guard against sqrt(0): use 1.0 in the inactive branch of np.where.
+            safe_var = np.where(variance_est > 0.0, variance_est, 1.0)
+            w[idx] = np.where(variance_est > 0.0, 1.0 / np.sqrt(safe_var), 0.0)
 
-        return self._mean_and_variance(D, w)
+        return self._summarise(phi, w)
 
     # ------------------------------------------------------------------
-    # Utility
+    # Shared utility
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _mean_and_variance(
-        D: NDArray[np.float64],
+    def _summarise(
+        phi: NDArray[np.float64],
         w: NDArray[np.float64] | None = None,
     ) -> tuple[float, float]:
+        """Return the (mean, variance-of-mean) estimate of a policy value.
+
+        Uses the weighted mean ``(phi . w) / sum(w)`` and the sandwich
+        variance ``sum(w_i^2 (phi_i - mu)^2) / (sum w)^2``.  Falls back to
+        uniform weights when *w* is None or all-zero.
+        """
         if w is None:
-            w = np.ones_like(D)
+            w = np.ones_like(phi)
         w_sum = w.sum()
         if w_sum == 0.0:
-            # Degenerate case (e.g. only one observation, or all adaptive weights
-            # are zero because variance could not be estimated).  Fall back to the
-            # unweighted mean so downstream code always receives a finite value.
-            w = np.ones_like(D)
-            w_sum = float(len(D))
-        mean = float(D.dot(w) / w_sum)
-        variance = float((w**2).dot((D - mean) ** 2) / w_sum**2)
+            w = np.ones_like(phi)
+            w_sum = float(len(phi))
+        mean = float(phi.dot(w) / w_sum)
+        variance = float((w ** 2).dot((phi - mean) ** 2) / w_sum ** 2)
         return mean, variance

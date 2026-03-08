@@ -5,11 +5,13 @@ from numpy.typing import NDArray
 from sklearn.base import BaseEstimator, is_classifier
 
 
-def predict(model: BaseEstimator, X: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Unified predict for classifiers (predict_proba[:,1]) and regressors (.predict).
+def score(model: BaseEstimator, X: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Return scalar outcome predictions for *X* from any sklearn-compatible estimator.
 
-    For a classifier with only one class in its training data, returns a constant
-    array equal to that class label.
+    Classifiers are handled by returning ``predict_proba(X)[:, 1]`` (the
+    positive-class probability).  A degenerate classifier trained on a single
+    class returns a constant array equal to that class value.  Regressors are
+    handled by returning ``predict(X)`` directly.
     """
     if is_classifier(model):
         classes = model.classes_  # type: ignore[attr-defined]

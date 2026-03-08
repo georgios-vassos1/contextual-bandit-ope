@@ -40,9 +40,9 @@ class OpenMLCC18World:
         self._feature_count: int = int(contexts.shape[1])
         self._observation_count: int = int(contexts.shape[0])
 
-        shuffle = np.random.permutation(self._observation_count)
-        self.contexts: NDArray[np.float64] = contexts[shuffle].astype(np.float64)
-        self.arms: NDArray[np.intp] = arms[shuffle].astype(np.intp)
+        perm = np.random.permutation(self._observation_count)
+        self.contexts: NDArray[np.float64] = contexts[perm].astype(np.float64)
+        self.arms: NDArray[np.intp] = arms[perm].astype(np.intp)
 
         # bytes keys are faster to create and hash than float tuples.
         self._context_to_optimal_arm: dict[bytes, int] = {

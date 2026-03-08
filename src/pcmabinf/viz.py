@@ -47,17 +47,17 @@ def bar_plot(
     matplotlib.axes.Axes
         The axes object so the caller can further customise or save the figure.
     """
-    mean_metric = np.mean(data, axis=1)
-    stderr_metric = np.sqrt(np.var(data, axis=1) / data.shape[1])
+    means = np.mean(data, axis=1)
+    stderrs = np.sqrt(np.var(data, axis=1) / data.shape[1])
 
     print(f"\n{metric}")
     for i, label in enumerate(labels):
-        print(f"{label.upper()}: {mean_metric[i]:.4f} ({stderr_metric[i]:.4f})")
+        print(f"{label.upper()}: {means[i]:.4f} ({stderrs[i]:.4f})")
 
     cmap = matplotlib.colormaps["tab10"]
     colors = [cmap(i) for i in range(len(data))]
     fig, ax = plt.subplots()
-    ax.bar(x=range(len(data)), color=colors, height=mean_metric, yerr=stderr_metric)
+    ax.bar(x=range(len(data)), color=colors, height=means, yerr=stderrs)
     ax.set_xticks(range(len(data)))
     ax.set_xticklabels([lbl.upper() for lbl in labels], rotation=90)
     if truth is not None:
@@ -111,14 +111,14 @@ def visualize_coverage(
 
     data = pd.read_pickle(results_path)
 
-    fontsize = 16
+    font_size = 16
     size = 3
-    nrows = len(target_policies)
-    ncols = len(competitors)
-    # squeeze=False ensures axs is always 2-D, even for nrows=1 or ncols=1.
+    n_rows = len(target_policies)
+    n_cols = len(competitors)
+    # squeeze=False ensures axs is always 2-D, even for n_rows=1 or n_cols=1.
     fig, axs = plt.subplots(
-        nrows=nrows, ncols=ncols,
-        figsize=(size * (ncols + 3.5), size * (nrows + 1)),
+        nrows=n_rows, ncols=n_cols,
+        figsize=(size * (n_cols + 3.5), size * (n_rows + 1)),
         squeeze=False,
     )
     fig.subplots_adjust(top=0.99, bottom=0.01, hspace=0.5, wspace=0.5)
@@ -130,40 +130,40 @@ def visualize_coverage(
 
     for t, tp in enumerate(target_policies):
         # Each column is a scalar per task; collect as arrays over tasks.
-        mean_main = data[f"{tp}_{main}_mean"].to_numpy(dtype=float)
-        stderr_main = data[f"{tp}_{main}_stderr"].to_numpy(dtype=float)
+        y_bar = data[f"{tp}_{main}_mean"].to_numpy(dtype=float)
+        y_err = data[f"{tp}_{main}_stderr"].to_numpy(dtype=float)
 
         for i1, comp in enumerate(competitors):
             ax = axs[t][i1]
 
-            mean_comp = data[f"{tp}_{comp}_mean"].to_numpy(dtype=float)
-            stderr_comp = data[f"{tp}_{comp}_stderr"].to_numpy(dtype=float)
+            x_bar = data[f"{tp}_{comp}_mean"].to_numpy(dtype=float)
+            x_err = data[f"{tp}_{comp}_stderr"].to_numpy(dtype=float)
 
             # Color: black = overlap, red = competitor better, blue = main better.
-            diff = mean_comp - mean_main
-            combined_err = stderr_comp + stderr_main
+            diff = x_bar - y_bar
+            combined_err = x_err + y_err
             colors_arr = np.where(
                 np.abs(diff)[:, None] <= combined_err[:, None],
                 [[0, 0, 0]],
                 np.where(diff[:, None] > 0, [[1, 0, 0]], [[0, 0, 1]]),
             ).astype(float)
 
-            ax.scatter(x=mean_comp, y=mean_main, zorder=3, c=colors_arr, s=50, alpha=0.5)
+            ax.scatter(x=x_bar, y=y_bar, zorder=3, c=colors_arr, s=50, alpha=0.5)
             ax.errorbar(
-                x=mean_comp,
-                y=mean_main,
-                xerr=stderr_comp,
-                yerr=stderr_main,
+                x=x_bar,
+                y=y_bar,
+                xerr=x_err,
+                yerr=y_err,
                 c="black",
                 zorder=0,
                 fmt="none",
             )
             ax.set_xlabel(
                 f"{_DISPLAY.get(comp, comp.upper())} {ci_label}{x_label_suffix}",
-                fontsize=fontsize,
+                fontsize=font_size,
             )
-            ax.set_ylabel(main_label, fontsize=fontsize)
-            ax.tick_params(axis="both", which="major", labelsize=fontsize - 4)
+            ax.set_ylabel(main_label, fontsize=font_size)
+            ax.tick_params(axis="both", which="major", labelsize=font_size - 4)
             ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
             ax.set_yticks([0, 0.25, 0.5, 0.75, 1])
             ax.set_xlim([-0.1, 1.1])
@@ -171,7 +171,7 @@ def visualize_coverage(
             ax.axhline(y=0.95, linestyle="--", color="black")
             ax.axvline(x=0.95, linestyle="--", color="black")
             ax.axline(xy1=(0, 0), xy2=(10, 10), linestyle="-", color="black", alpha=0.3)
-            ax.set_title(target_policy_names.get(tp, tp), fontsize=fontsize)
+            ax.set_title(target_policy_names.get(tp, tp), fontsize=font_size)
 
     if output_path is not None:
         fig.savefig(output_path)

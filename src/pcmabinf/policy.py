@@ -7,7 +7,7 @@ from numpy.typing import NDArray
 from sklearn.base import BaseEstimator, clone
 from sklearn.dummy import DummyRegressor
 
-from pcmabinf._utils import predict
+from pcmabinf._utils import score
 from pcmabinf.world import OpenMLCC18World
 
 
@@ -98,8 +98,8 @@ class ContextualPolicy:
             self._models.append(m)
 
     def pi(self, X: NDArray[np.float64]) -> NDArray[np.float64]:
-        Y_hat = np.column_stack([predict(m, X) for m in self._models])
-        best = np.argmax(Y_hat, axis=1)
+        scores = np.column_stack([score(m, X) for m in self._models])
+        best = np.argmax(scores, axis=1)
         probs = np.zeros((len(X), self._arm_count), dtype=np.float64)
         probs[np.arange(len(X)), best] = 1.0  # vectorised scatter; no Python loop
         return probs
