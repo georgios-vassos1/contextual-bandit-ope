@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from joblib import Parallel, delayed
 from sklearn.base import BaseEstimator
@@ -21,7 +23,9 @@ def run_bandit_simulations(
     """Run *n_simulations* independent bandit data-collection runs in parallel.
 
     Uses ``joblib.Parallel`` (loky backend by default) so there is no global
-    state sharing — each worker receives the arguments by value.
+    state sharing — each worker receives the arguments by value.  Failed
+    workers emit a :class:`UserWarning` and are excluded from the returned
+    list rather than crashing the entire batch.
 
     Parameters
     ----------
@@ -33,10 +37,23 @@ def run_bandit_simulations(
     """
     rng = np.random.default_rng(seed)
     seeds = rng.integers(0, 2**31, size=n_simulations).tolist()
-    results: list[BanditData] = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
-        delayed(run_logging_policy)(world, config, s) for s in seeds
+
+    def _single_sim(s: int) -> BanditData | None:
+        try:
+            return run_logging_policy(world, config, s)
+        except Exception:  # noqa: BLE001
+            return None
+
+    raw: list[BanditData | None] = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
+        delayed(_single_sim)(s) for s in seeds
     )
-    return results
+    n_failed = sum(r is None for r in raw)
+    if n_failed:
+        warnings.warn(
+            f"{n_failed}/{n_simulations} bandit simulations failed and were excluded.",
+            stacklevel=2,
+        )
+    return [r for r in raw if r is not None]
 
 
 def run_ope_simulations(
@@ -48,6 +65,9 @@ def run_ope_simulations(
     n_jobs: int = -1,
 ) -> list[OPEResult]:
     """Run :class:`OPEEstimator` on each :class:`BanditData` in parallel.
+
+    Failed workers emit a :class:`UserWarning` and are excluded from the
+    returned list rather than crashing the entire batch.
 
     Parameters
     ----------
@@ -64,11 +84,21 @@ def run_ope_simulations(
     n_jobs:
         Joblib parallelism (-1 = all cores).
     """
+    n_total = len(bandit_data_list)
 
-    def _single(data: BanditData) -> OPEResult:
-        return OPEEstimator(data, world, target_policy, outcome_model, n_folds).compute_all()
+    def _single(data: BanditData) -> OPEResult | None:
+        try:
+            return OPEEstimator(data, world, target_policy, outcome_model, n_folds).compute_all()
+        except Exception:  # noqa: BLE001
+            return None
 
-    results: list[OPEResult] = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
+    raw: list[OPEResult | None] = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
         delayed(_single)(d) for d in bandit_data_list
     )
-    return results
+    n_failed = sum(r is None for r in raw)
+    if n_failed:
+        warnings.warn(
+            f"{n_failed}/{n_total} OPE estimations failed and were excluded.",
+            stacklevel=2,
+        )
+    return [r for r in raw if r is not None]

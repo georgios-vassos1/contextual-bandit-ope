@@ -6,7 +6,8 @@ import pytest
 from sklearn.linear_model import LinearRegression
 
 from pcmabinf.data import BanditData, OPEResult
-from pcmabinf.logging_policy import LoggingConfig
+from pcmabinf.estimators import OPEEstimator
+from pcmabinf.logging_policy import LoggingConfig, run_logging_policy
 from pcmabinf.policy import UniformPolicy
 from pcmabinf.simulate import run_bandit_simulations, run_ope_simulations
 from pcmabinf.world import OpenMLCC18World
@@ -80,3 +81,61 @@ def test_simulations_are_independent(world: OpenMLCC18World, small_config: Loggi
         np.array_equal(results[0].A, results[1].A)
         and np.array_equal(results[1].A, results[2].A)
     )
+
+
+# ---------------------------------------------------------------------------
+# Error-handling tests
+# ---------------------------------------------------------------------------
+
+
+def test_bandit_simulation_failure_is_skipped(
+    world: OpenMLCC18World, small_config: LoggingConfig
+) -> None:
+    """A failing worker must be excluded with a warning, not crash the batch."""
+    from unittest.mock import patch
+
+    original = run_logging_policy
+    call_count = 0
+
+    def sometimes_fail(w, c, s=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise RuntimeError("simulated failure")
+        return original(w, c, s)
+
+    with patch("pcmabinf.simulate.run_logging_policy", sometimes_fail):
+        with pytest.warns(UserWarning, match="1/3"):
+            results = run_bandit_simulations(world, small_config, n_simulations=3, n_jobs=1)
+
+    assert len(results) == 2
+    assert all(isinstance(r, BanditData) for r in results)
+
+
+def test_ope_simulation_failure_is_skipped(
+    world: OpenMLCC18World, small_config: LoggingConfig
+) -> None:
+    """A failing OPE worker must be excluded with a warning, not crash the batch."""
+    from unittest.mock import patch
+
+    bandit_data_list = run_bandit_simulations(world, small_config, n_simulations=3, n_jobs=1)
+    policy = UniformPolicy(arm_count=world.arm_count)
+
+    call_count = 0
+    original_init = OPEEstimator.__init__
+
+    def sometimes_fail(self, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise RuntimeError("simulated OPE failure")
+        return original_init(self, *args, **kwargs)
+
+    with patch.object(OPEEstimator, "__init__", sometimes_fail):
+        with pytest.warns(UserWarning, match="1/3"):
+            results = run_ope_simulations(
+                bandit_data_list, world, policy, LinearRegression(), n_folds=3, n_jobs=1
+            )
+
+    assert len(results) == 2
+    assert all(isinstance(r, OPEResult) for r in results)
