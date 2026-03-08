@@ -14,7 +14,7 @@ from sklearn.tree import DecisionTreeRegressor
 from pcmabinf.logging_policy import LoggingConfig
 from pcmabinf.metrics import compute_coverage_metrics
 from pcmabinf.policy import make_target_policy
-from pcmabinf.simulate import run_bandit_simulations, run_ope_simulations
+from pcmabinf.simulate import run_bandit_simulations, run_ope_simulations_multipolicy
 from pcmabinf.world import OpenMLCC18World
 
 
@@ -125,15 +125,16 @@ def run_cmd(
                 "arm1": make_target_policy("non_contextual_constant_1", world),
             }
 
+            all_ope = run_ope_simulations_multipolicy(
+                bandit_data_list,
+                world,
+                target_policies,
+                outcome_model=LinearRegression(),
+                n_jobs=n_jobs,
+            )
+
             row: dict = {"task_id": tid}
-            for name, policy in target_policies.items():
-                ope_results = run_ope_simulations(
-                    bandit_data_list,
-                    world,
-                    policy,
-                    outcome_model=LinearRegression(),
-                    n_jobs=n_jobs,
-                )
+            for name, ope_results in all_ope.items():
                 metrics = compute_coverage_metrics(ope_results)
                 for key, val in metrics.items():
                     row[f"{name}_{key}"] = float(val)

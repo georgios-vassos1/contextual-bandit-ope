@@ -17,7 +17,7 @@ from pcmabinf.policy import (
     UniformPolicy,
     make_target_policy,
 )
-from pcmabinf.simulate import run_bandit_simulations, run_ope_simulations
+from pcmabinf.simulate import run_bandit_simulations, run_ope_simulations, run_ope_simulations_multipolicy
 from pcmabinf.world import OpenMLCC18World
 
 __all__ = [
@@ -37,6 +37,7 @@ __all__ = [
     "OPEEstimator",
     "run_bandit_simulations",
     "run_ope_simulations",
+    "run_ope_simulations_multipolicy",
     "compute_coverage_metrics",
     "ESTIMATOR_FIELDS",
 ]

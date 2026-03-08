@@ -63,6 +63,74 @@ def run_bandit_simulations(
     return [r for r in raw if r is not None]
 
 
+def run_ope_simulations_multipolicy(
+    bandit_data_list: list[BanditData],
+    world: OpenMLCC18World,
+    target_policies: dict[str, TargetPolicyProtocol],
+    outcome_model: BaseEstimator,
+    n_folds: int = 4,
+    n_jobs: int = -1,
+) -> dict[str, list[OPEResult]]:
+    """Evaluate multiple target policies over all simulations in a single parallel pass.
+
+    Submits all ``len(target_policies) × len(bandit_data_list)`` jobs to one
+    worker pool, eliminating repeated pool initialisation overhead and the
+    inter-policy serialisation present when calling
+    :func:`run_ope_simulations` once per policy.
+
+    Parameters
+    ----------
+    target_policies:
+        Mapping of policy name → policy object.  All policies are evaluated
+        against every element of *bandit_data_list*.
+
+    Returns
+    -------
+    dict
+        Keys are policy names; values are lists of :class:`OPEResult` (failed
+        workers are excluded with a :class:`UserWarning`).
+    """
+    policy_names = list(target_policies.keys())
+    policies = list(target_policies.values())
+    n_sims = len(bandit_data_list)
+    n_total = len(policy_names) * n_sims
+
+    def _single(policy_idx: int, data: BanditData) -> OPEResult | None:
+        try:
+            return OPEEstimator(
+                data, world, policies[policy_idx], outcome_model, n_folds
+            ).compute_all()
+        except Exception:  # noqa: BLE001
+            return None
+
+    try:
+        raw: list[OPEResult | None] = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
+            delayed(_single)(pi, data)
+            for pi in range(len(policy_names))
+            for data in bandit_data_list
+        )
+    except TerminatedWorkerError as exc:
+        raise RuntimeError(
+            "A joblib worker was killed during OPE estimation (likely out of memory). "
+            "Try --n-jobs 1 or --task-max-features to skip large tasks."
+        ) from exc
+
+    n_failed = sum(r is None for r in raw)
+    if n_failed:
+        warnings.warn(
+            f"{n_failed}/{n_total} OPE estimations failed and were excluded.",
+            stacklevel=2,
+        )
+
+    # Reshape flat list back into per-policy lists.
+    results: dict[str, list[OPEResult]] = {name: [] for name in policy_names}
+    for idx, result in enumerate(raw):
+        if result is not None:
+            results[policy_names[idx // n_sims]].append(result)
+
+    return results
+
+
 def run_ope_simulations(
     bandit_data_list: list[BanditData],
     world: OpenMLCC18World,
