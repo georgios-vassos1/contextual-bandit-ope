@@ -1,4 +1,4 @@
-.PHONY: install build clean-cache test reproduce
+.PHONY: install build clean-cache test reproduce notebook
 
 # Default data directory (override with: make reproduce DATA_DIR=/path/to/OpenML-CC18)
 DATA_DIR ?= $(HOME)/pcmabinf/OpenML-CC18
@@ -28,6 +28,13 @@ clean-cache:
 
 test:
 	uv run pytest --tb=short
+
+notebook:
+	uv run jupyter nbconvert --to notebook --execute \
+		--ExecutePreprocessor.kernel_name=python3 \
+		--ExecutePreprocessor.startup_timeout=120 \
+		--inplace \
+		notebooks/tutorial.ipynb
 
 reproduce:
 	uv run pcmabinf run \

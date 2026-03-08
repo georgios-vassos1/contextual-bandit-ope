@@ -1,12 +1,18 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 *.egg-info/
+*.egg
 dist/
 build/
+MANIFEST
 
 # Virtual environments
 .venv/
+.env/
+env/
 
 # uv
 uv.lock
@@ -16,12 +22,27 @@ uv.lock
 .coverage.*
 htmlcov/
 .pytest_cache/
+.tox/
 
-# mypy
+# Type checking
 .mypy_cache/
+.pyright/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
 
 # Results / output
 results/
 
 # macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
