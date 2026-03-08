@@ -76,3 +76,40 @@ def test_reward_mean_per_arm(world: OpenMLCC18World) -> None:
     assert means.shape == (world.arm_count,)
     assert means[optimal] == pytest.approx(1.0)
     assert means.sum() == pytest.approx(1.0)
+
+
+def test_optimal_arms_batch(world: OpenMLCC18World) -> None:
+    """optimal_arms_batch should match scalar _optimal_arm for every context."""
+    n = 20
+    X = world.sample_contexts(n)
+    batch = world.optimal_arms_batch(X)
+    assert batch.shape == (n,)
+    for i, x in enumerate(X):
+        assert batch[i] == world._optimal_arm(x)
+
+
+def test_rewards_batch_shape_and_range(world: OpenMLCC18World) -> None:
+    n = 30
+    X = world.sample_contexts(n)
+    A = np.random.choice(world.arm_count, size=n).astype(np.intp)
+    R = world.rewards_batch(X, A)
+    assert R.shape == (n,)
+    # With reward_variance=0 (fixture default) rewards are 0 or 1 exactly.
+    assert np.all((R == 0.0) | (R == 1.0))
+
+
+def test_regrets_batch_shape_and_range(world: OpenMLCC18World) -> None:
+    n = 30
+    X = world.sample_contexts(n)
+    A = np.random.choice(world.arm_count, size=n).astype(np.intp)
+    reg = world.regrets_batch(X, A)
+    assert reg.shape == (n,)
+    assert set(reg.tolist()).issubset({0, 1})
+
+
+def test_rewards_batch_optimal_arm_gives_one(world: OpenMLCC18World) -> None:
+    """Choosing the optimal arm should always give reward=1 with variance=0."""
+    X = world.sample_contexts(20)
+    A = world.optimal_arms_batch(X)
+    R = world.rewards_batch(X, A)
+    assert np.all(R == pytest.approx(1.0))

@@ -83,7 +83,7 @@ class ContextualPolicy:
         self._arm_count = world.arm_count
         contexts = world.sample_contexts(train_sample_size)
         arms = np.random.choice(self._arm_count, size=len(contexts))
-        rewards = np.array([world.reward(x, int(a)) for x, a in zip(contexts, arms)])
+        rewards = world.rewards_batch(contexts, arms.astype(np.intp))
 
         self._models: list[BaseEstimator] = []
         for a in range(self._arm_count):

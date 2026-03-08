@@ -22,6 +22,16 @@ class LoggingConfig:
     epsilon_multiplier: float = 1.0
     outcome_model: BaseEstimator = field(default_factory=DecisionTreeRegressor)
 
+    def __post_init__(self) -> None:
+        if self.batch_count <= 0:
+            raise ValueError(f"batch_count must be > 0, got {self.batch_count}")
+        if self.batch_size <= 0:
+            raise ValueError(f"batch_size must be > 0, got {self.batch_size}")
+        if self.epsilon_multiplier <= 0.0:
+            raise ValueError(
+                f"epsilon_multiplier must be > 0, got {self.epsilon_multiplier}"
+            )
+
 
 def run_logging_policy(world: OpenMLCC18World, config: LoggingConfig) -> BanditData:
     """Collect bandit data by running the logging policy defined in *config*.
@@ -101,16 +111,10 @@ def run_logging_policy(world: OpenMLCC18World, config: LoggingConfig) -> BanditD
                 raise ValueError(f"Unknown strategy: {config.strategy!r}")
 
             # ----------------------------------------------------------------
-            # Observe rewards and regrets
+            # Observe rewards and regrets  (vectorised — no Python loop)
             # ----------------------------------------------------------------
-            Y_batch = np.array(
-                [world.reward(x, int(a)) for x, a in zip(X_batch, A_batch)],
-                dtype=np.float64,
-            )
-            reg_batch = np.array(
-                [world.regret(x, int(a)) for x, a in zip(X_batch, A_batch)],
-                dtype=np.intp,
-            )
+            Y_batch = world.rewards_batch(X_batch, A_batch)
+            reg_batch = world.regrets_batch(X_batch, A_batch)
 
             # Write into pre-allocated buffers.
             X_buf[n : n + bs] = X_batch

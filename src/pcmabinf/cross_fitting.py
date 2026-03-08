@@ -80,6 +80,10 @@ def cross_fitting(
         P_train = data.P[train_idx]
         X_eval = data.X[eval_idx]
 
+        # Compute target-policy probabilities once for the entire training fold
+        # instead of calling pi() K times on different arm subsets.
+        g_star_train = target_policy.pi(X_train)  # (n_train, K)
+
         for a in range(arm_count):
             idx_a = np.where(A_train == a)[0]
             if len(idx_a) == 0:
@@ -88,29 +92,25 @@ def cross_fitting(
             X_a = X_train[idx_a]
             Y_a = Y_train[idx_a]
             g_a = P_train[idx_a]
-            g_star_a = target_policy.pi(X_train[idx_a])[:, a]
+            g_star_a = g_star_train[idx_a, a]
 
             # --- Unweighted DM model ---
             m = clone(outcome_model)
             m.fit(X_a, Y_a)
             Q[eval_idx, a] = predict(m, X_eval)
 
-            # --- MRDR model: w = g*(a|x)(1-g(a|x)) / g(a|x)^2 ---
             # When g_star_a is all-zero the target policy never selects this arm,
-            # so the weighted model is undefined; fall back to unit weights.
-            if np.all(g_star_a == 0):
-                w_mrdr = np.ones_like(Y_a)
-            else:
-                w_mrdr = g_star_a * (1.0 - g_a) / (g_a**2)
+            # so the weighted models are undefined; fall back to unit weights.
+            all_zero_g_star = np.all(g_star_a == 0)
+
+            # --- MRDR model: w = g*(a|x)(1-g(a|x)) / g(a|x)^2 ---
+            w_mrdr = np.ones_like(Y_a) if all_zero_g_star else g_star_a * (1.0 - g_a) / (g_a**2)
             m_mrdr = clone(outcome_model)
             m_mrdr.fit(X_a, Y_a, sample_weight=w_mrdr)
             Q_MRDR[eval_idx, a] = predict(m_mrdr, X_eval)
 
             # --- CAMRDR model: w = g*(a|x) / g(a|x) ---
-            if np.all(g_star_a == 0):
-                w_camrdr = np.ones_like(Y_a)
-            else:
-                w_camrdr = g_star_a / g_a
+            w_camrdr = np.ones_like(Y_a) if all_zero_g_star else g_star_a / g_a
             m_camrdr = clone(outcome_model)
             m_camrdr.fit(X_a, Y_a, sample_weight=w_camrdr)
             Q_CAMRDR[eval_idx, a] = predict(m_camrdr, X_eval)

@@ -53,16 +53,17 @@ class OPEEstimator:
         self._Q_MRDR = Q_MRDR
         self._Q_CAMRDR = Q_CAMRDR
 
+        # Row indices — computed once, reused by every estimator method.
+        self._row_idx = np.arange(N)
+
         # Target policy action probabilities: (N, K)
         self._g_star: NDArray[np.float64] = target_policy.pi(data.X)
 
         # True expected reward E[Y | A=a, X=x] under the world: (N, K)
-        self._Y_true: NDArray[np.float64] = np.array(
-            [world.reward_mean_per_arm(x) for x in data.X], dtype=np.float64
-        )
-
-        # Row indices — computed once, reused by every estimator method.
-        self._row_idx = np.arange(N)
+        # Vectorised: one dict-lookup per observation instead of K-element arrays.
+        optimal_arms = world.optimal_arms_batch(data.X)
+        self._Y_true = np.zeros((N, arm_count), dtype=np.float64)
+        self._Y_true[self._row_idx, optimal_arms] = 1.0
 
         # Per-observation selected-arm quantities — computed once, reused everywhere.
         # g*(a_i | x_i): probability the target policy assigns to the arm that was taken.

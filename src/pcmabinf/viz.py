@@ -115,10 +115,18 @@ def visualize_coverage(
     size = 3
     nrows = len(target_policies)
     ncols = len(competitors)
+    # squeeze=False ensures axs is always 2-D, even for nrows=1 or ncols=1.
     fig, axs = plt.subplots(
-        nrows=nrows, ncols=ncols, figsize=(size * (ncols + 3.5), size * (nrows + 1))
+        nrows=nrows, ncols=ncols,
+        figsize=(size * (ncols + 3.5), size * (nrows + 1)),
+        squeeze=False,
     )
     fig.subplots_adjust(top=0.99, bottom=0.01, hspace=0.5, wspace=0.5)
+
+    # Precompute once — ci_pct is a pure function of a constant.
+    ci_label = int(ci_pct(0.95))
+    x_label_suffix = f"% CI Coverage"
+    main_label = f"{_DISPLAY.get(main, main.upper())} {ci_label}{x_label_suffix}"
 
     for t, tp in enumerate(target_policies):
         # Each column is a scalar per task; collect as arrays over tasks.
@@ -151,13 +159,10 @@ def visualize_coverage(
                 fmt="none",
             )
             ax.set_xlabel(
-                f"{_DISPLAY.get(comp, comp.upper())} {int(ci_pct(0.95))}% CI Coverage",
+                f"{_DISPLAY.get(comp, comp.upper())} {ci_label}{x_label_suffix}",
                 fontsize=fontsize,
             )
-            ax.set_ylabel(
-                f"{_DISPLAY.get(main, main.upper())} {int(ci_pct(0.95))}% CI Coverage",
-                fontsize=fontsize,
-            )
+            ax.set_ylabel(main_label, fontsize=fontsize)
             ax.tick_params(axis="both", which="major", labelsize=fontsize - 4)
             ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
             ax.set_yticks([0, 0.25, 0.5, 0.75, 1])

@@ -33,7 +33,7 @@ class OpenMLCC18World:
         with open(path, "rb") as fh:
             contexts, arms = pickle.load(fh)
 
-        if np.sum(np.isnan(contexts)) > 0:
+        if np.any(np.isnan(contexts)):
             contexts = SimpleImputer().fit_transform(contexts)
 
         self._arm_count: int = int(len(np.unique(arms)))
@@ -44,8 +44,9 @@ class OpenMLCC18World:
         self.contexts: NDArray[np.float64] = contexts[shuffle].astype(np.float64)
         self.arms: NDArray[np.intp] = arms[shuffle].astype(np.intp)
 
-        self._context_to_optimal_arm: dict[tuple[float, ...], int] = {
-            tuple(map(float, c)): int(a) for c, a in zip(self.contexts, self.arms)
+        # bytes keys are faster to create and hash than float tuples.
+        self._context_to_optimal_arm: dict[bytes, int] = {
+            c.tobytes(): int(a) for c, a in zip(self.contexts, self.arms)
         }
 
     # ------------------------------------------------------------------
@@ -69,7 +70,7 @@ class OpenMLCC18World:
     # ------------------------------------------------------------------
 
     def _optimal_arm(self, x: NDArray[np.float64]) -> int:
-        return self._context_to_optimal_arm[tuple(map(float, x))]
+        return self._context_to_optimal_arm[x.tobytes()]
 
     def reward(self, x: NDArray[np.float64], arm: int) -> float:
         reward_mean = float(arm == self._optimal_arm(x))
@@ -77,6 +78,37 @@ class OpenMLCC18World:
 
     def regret(self, x: NDArray[np.float64], arm: int) -> int:
         return int(arm != self._optimal_arm(x))
+
+    def optimal_arms_batch(self, X: NDArray[np.float64]) -> NDArray[np.intp]:
+        """Return the optimal arm index for each row of *X*."""
+        return np.array(
+            [self._context_to_optimal_arm[x.tobytes()] for x in X], dtype=np.intp
+        )
+
+    def rewards_batch(
+        self, X: NDArray[np.float64], A: NDArray[np.intp]
+    ) -> NDArray[np.float64]:
+        """Return observed rewards for a batch of (context, arm) pairs.
+
+        Vectorized equivalent of calling :meth:`reward` for each row.
+        """
+        optimal = self.optimal_arms_batch(X)
+        reward_means = (A == optimal).astype(np.float64)
+        if self.reward_variance > 0.0:
+            reward_means = reward_means + np.random.normal(
+                loc=0.0, scale=np.sqrt(self.reward_variance), size=len(X)
+            )
+        return reward_means
+
+    def regrets_batch(
+        self, X: NDArray[np.float64], A: NDArray[np.intp]
+    ) -> NDArray[np.intp]:
+        """Return 0/1 regret for a batch of (context, arm) pairs.
+
+        Vectorized equivalent of calling :meth:`regret` for each row.
+        """
+        optimal = self.optimal_arms_batch(X)
+        return (A != optimal).astype(np.intp)
 
     def reward_mean_per_arm(self, x: NDArray[np.float64]) -> NDArray[np.float64]:
         means = np.zeros(self._arm_count, dtype=np.float64)

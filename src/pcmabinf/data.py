@@ -19,6 +19,17 @@ class BanditData:
     regret: NDArray[np.intp]  # (N,)   0/1 regret
     batch_size: int
 
+    def __post_init__(self) -> None:
+        N = self.X.shape[0]
+        for name, arr in (("A", self.A), ("Y", self.Y), ("P", self.P),
+                          ("epsilon", self.epsilon), ("regret", self.regret)):
+            if arr.shape != (N,):
+                raise ValueError(
+                    f"BanditData.{name} must have shape ({N},), got {arr.shape}"
+                )
+        if self.batch_size <= 0:
+            raise ValueError(f"batch_size must be > 0, got {self.batch_size}")
+
 
 @dataclass
 class OPEResult:

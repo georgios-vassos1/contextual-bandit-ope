@@ -60,3 +60,18 @@ def test_unknown_strategy_raises(world: OpenMLCC18World) -> None:
     config = LoggingConfig(batch_count=1, batch_size=10, strategy="bogus")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="Unknown strategy"):
         run_logging_policy(world, config)
+
+
+def test_logging_config_invalid_batch_count() -> None:
+    with pytest.raises(ValueError, match="batch_count"):
+        LoggingConfig(batch_count=0, batch_size=10)
+
+
+def test_logging_config_invalid_batch_size() -> None:
+    with pytest.raises(ValueError, match="batch_size"):
+        LoggingConfig(batch_count=5, batch_size=0)
+
+
+def test_logging_config_invalid_epsilon_multiplier() -> None:
+    with pytest.raises(ValueError, match="epsilon_multiplier"):
+        LoggingConfig(batch_count=5, batch_size=10, epsilon_multiplier=-1.0)
